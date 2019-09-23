@@ -2,14 +2,14 @@ const express = require('express');
 const auth = require('../middleware/auth');
 const router = new express.Router();
 const User = require('../models/user');
+const multer = require('multer');
+const sharp = require('sharp');
 
 /**
  * Create user
  */
 router.post('/users', async (req, res) => {
   const user = new User(req.body);
-
-  console.log(req.body);
 
   try {
     await user.save();
@@ -72,7 +72,7 @@ router.get('/users', auth, async (req, res) => {
     const users = await User.find({});
     res.send(users);
   } catch (e) {
-    res.status(500).send();
+    res.status(500).send(e);
   }
 });
 
@@ -83,55 +83,13 @@ router.get('/users/me', auth, async (req, res) => {
   try {
     res.send(req.user);
   } catch (e) {
-    console.log(e);
+    res.status(500).send(e);
   }
 });
 
 /**
- * Read user
+ * Update current user
  */
-// router.get('/users/:id', async (req, res) => {
-//   const _id = req.params.id;
-
-//   try {
-//     const user = await User.findById(_id);
-//     if (!user) {
-//       return res.status(404).send();
-//     }
-//     res.send(user);
-//   } catch (e) {
-//     res.status(500).send();
-//   }
-// });
-
-/**
- * Update user
- */
-// router.patch('/users/:id', async (req, res) => {
-//   const updates = Object.keys(req.body);
-//   const allowedUpdates = ['name', 'age', 'email', 'password'];
-//   const isValidOperation = updates.every(update =>
-//     allowedUpdates.includes(update)
-//   );
-
-//   if (!isValidOperation) {
-//     return res.status(400).send('error: invalid updates attempted');
-//   }
-
-//   try {
-//     const user = await User.findById(req.params.id);
-
-//     updates.forEach(update => (user[update] = req.body[update]));
-//     await user.save();
-
-//     if (!user) {
-//       return res.status(404).send();
-//     }
-//     res.send(user);
-//   } catch (e) {
-//     res.status(400).send(e);
-//   }
-// });
 router.patch('/users/me', auth, async (req, res) => {
   const updates = Object.keys(req.body);
   const allowedUpdates = ['name', 'age', 'email', 'password'];
@@ -153,27 +111,84 @@ router.patch('/users/me', auth, async (req, res) => {
 });
 
 /**
- * Delete user
+ * Delete current user
  */
-// router.delete('/users/:id', async (req, res) => {
-//   try {
-//     const user = await User.findByIdAndDelete(req.params.id);
-
-//     if (!user) {
-//       return res.status(404).send();
-//     }
-//     res.send(user);
-//   } catch (e) {
-//     res.status(500).send(e);
-//   }
-// });
 router.delete('/users/me', auth, async (req, res) => {
   try {
     req.user.remove();
     res.send(req.user);
   } catch (e) {
-    console.log(e);
     res.status(500).send(e);
+  }
+});
+
+/**
+ * Create multer upload
+ */
+const upload = multer({
+  limits: {
+    fileSize: 1024 * 1024
+  },
+  fileFilter(req, file, cb) {
+    if (!file.originalname.match(/\.(jpg|jpeg|png)$/)) {
+      return cb(new Error('File must be an image file'));
+    }
+    cb(undefined, true);
+  }
+});
+
+/**
+ * Upload avatar
+ */
+router.post(
+  '/users/me/avatar',
+  auth,
+  upload.single('avatar'),
+  async (req, res) => {
+    const buffer = await sharp(req.file.buffer)
+      .resize({ width: 250, height: 250 })
+      .png()
+      .toBuffer();
+
+    req.user.avatar = buffer;
+
+    await req.user.save();
+    res.send();
+  },
+  (error, req, res, next) => {
+    res.status(400).send({ error: error.message });
+  }
+);
+
+/**
+ * Delete avatar
+ */
+router.delete(
+  '/users/me/avatar',
+  auth,
+  async (req, res) => {
+    req.user.avatar = undefined;
+    await req.user.save();
+    res.send();
+  },
+  (error, req, res, next) => {}
+);
+
+/**
+ * Return avatar as an image
+ */
+router.get('/users/:id/avatar', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user || !user.avatar) {
+      throw new Error('no avatar');
+    }
+
+    res.set('Content-Type', 'image/png');
+    res.send(user.avatar);
+  } catch (e) {
+    res.status(400).send({ error: e.message });
   }
 });
 
